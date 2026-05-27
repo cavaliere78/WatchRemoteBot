@@ -24,6 +24,10 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 class MediaRemoteService : MediaBrowserServiceCompat() {
+    companion object {
+        var isRunning = false
+    }
+
     private lateinit var mediaSession: MediaSessionCompat
     private val CHANNEL_ID = "watch_remote_channel"
     private val NOTIFICATION_ID = 101
@@ -34,10 +38,10 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
 
         mediaSession = MediaSessionCompat(this, "MediaRemoteService").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
-            
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onSkipToNext() {
                     if (listaAzioni.isNotEmpty()) {
@@ -46,7 +50,6 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
                         aggiornaSchermoOrologio()
                     }
                 }
-
                 override fun onSkipToPrevious() {
                     if (listaAzioni.isNotEmpty()) {
                         indiceCorrente = if (indiceCorrente - 1 < 0) listaAzioni.size - 1 else indiceCorrente - 1
@@ -54,14 +57,8 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
                         aggiornaSchermoOrologio()
                     }
                 }
-
-                override fun onPlay() {
-                    eseguiComandoCorrente()
-                }
-
-                override fun onPause() {
-                    eseguiComandoCorrente()
-                }
+                override fun onPlay() { eseguiComandoCorrente() }
+                override fun onPause() { eseguiComandoCorrente() }
             })
             isActive = true
         }
@@ -87,9 +84,7 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
             for (i in 0 until jsonArray.length()) {
                 listaAzioni.add(jsonArray.getJSONObject(i))
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun notificaCambioStato() {
@@ -121,43 +116,29 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
         val nome = azioneObj.getString("nome")
         val urlString = azioneObj.getString("url")
 
-        // 1. CAMBIAMO IL NOME DELLA TRACCIA IN TEMPO REALE PER IL FEEDBACK
         val metadataFeedback = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "*** Azione $nome eseguita ***")
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "WatchRemoteBot")
             .build()
         mediaSession.setMetadata(metadataFeedback)
 
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(this, "Esecuzione: $nome...", Toast.LENGTH_SHORT).show()
-        }
+        // LEGGE IL PARAMETRO DALLE IMPOSTAZIONI O USA 1500ms DI DEFAULT
+        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+        val durata = prefs.getString("FEEDBACK_DURATION", "1500")?.toLongOrNull() ?: 1500L
 
-        // 2. RIPRISTINIAMO IL NOME ORIGINALE DOPO 1.5 SECONDI
         handlerFeedback.removeCallbacksAndMessages(null)
-        handlerFeedback.postDelayed({
-            aggiornaSchermoOrologio()
-        }, 1500)
+        handlerFeedback.postDelayed({ aggiornaSchermoOrologio() }, durata)
 
-        // 3. ESEGUIAMO LA CHIAMATA DI RETE
         if (!urlString.isNullOrEmpty() && urlString.startsWith("http")) {
             thread {
                 try {
                     val url = URL(urlString)
                     val connessione = url.openConnection() as HttpURLConnection
-                    // Manteniamo POST o GET in base all'ultimo aggiornamento (qui è impostato POST)
                     connessione.requestMethod = "POST" 
                     connessione.connectTimeout = 5000
-                    val responseCode = connessione.responseCode
+                    connessione.responseCode
                     connessione.disconnect()
-                    
-                    Handler(Looper.getMainLooper()).post {
-                        Toast.makeText(this, "$nome: Inviato ($responseCode)", Toast.LENGTH_SHORT).show()
-                    }
-                } catch (e: Exception) {
-                    Handler(Looper.getMainLooper()).post {
-                        Toast.makeText(this, "Errore rete: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
+                } catch (e: Exception) { e.printStackTrace() }
             }
         }
     }
@@ -167,7 +148,7 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Telecomando Multi-Action Watch")
-            .setContentText("Usa i tasti traccia per scorrere, Play per attivare.")
+            .setContentText("Il telecomando domotico è attivo")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent).build()
     }
@@ -181,7 +162,9 @@ class MediaRemoteService : MediaBrowserServiceCompat() {
 
     override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot? { return BrowserRoot("root", null) }
     override fun onLoadChildren(parentId: String, result: Result<List<MediaBrowserCompat.MediaItem>>) { result.sendResult(null) }
+    
     override fun onDestroy() { 
+        isRunning = false
         handlerFeedback.removeCallbacksAndMessages(null)
         mediaSession.release()
         super.onDestroy() 
