@@ -199,6 +199,47 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun mostraEsploraIntent(onSelected: (String, String, String) -> Unit) {
+        val pm = packageManager
+        val items = mutableListOf<String>()
+        val dataMap = mutableMapOf<String, Triple<String, String, String>>()
+
+        // Aggiungiamo alcuni intent impliciti comuni
+        val implicitCommon = mapOf(
+            "Apri Browser (VIEW)" to Triple("android.intent.action.VIEW", "", ""),
+            "Condividi (SEND)" to Triple("android.intent.action.SEND", "", ""),
+            "Tasker Action" to Triple("net.dinglisch.android.tasker.ACTION_TASK", "", "")
+        )
+        
+        implicitCommon.forEach { (label, data) ->
+            items.add("🌐 [Implicito] $label")
+            dataMap["🌐 [Implicito] $label"] = data
+        }
+
+        // Recuperiamo tutte le app installate che possono essere lanciate (hanno una MAIN activity)
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+        val pkgAppsList = pm.queryIntentActivities(mainIntent, 0)
+
+        pkgAppsList.forEach { resolveInfo ->
+            val label = resolveInfo.loadLabel(pm).toString()
+            val pkg = resolveInfo.activityInfo.packageName
+            val cls = resolveInfo.activityInfo.name
+            val entry = "📱 [Esplicito] $label ($pkg)"
+            items.add(entry)
+            dataMap[entry] = Triple(Intent.ACTION_MAIN, pkg, cls)
+        }
+        items.sort()
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Esplora Intent / Applicazioni")
+            .setItems(items.toTypedArray()) { _, which ->
+                val selected = items[which]
+                val triple = dataMap[selected]!!
+                onSelected(triple.first, triple.second, triple.third)
+            }
+            .show()
+    }
+
     private fun mostraDialogAzione(posizione: Int?, azioneEsistente: JSONObject?) {
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_azione, null)
         
@@ -213,13 +254,25 @@ class MainActivity : AppCompatActivity() {
         val etHaEntity = view.findViewById<AutoCompleteTextView>(R.id.etHaEntity)
         val etHaData = view.findViewById<TextInputEditText>(R.id.etHaData)
         val tvHaStatus = view.findViewById<TextView>(R.id.tvHaStatus)
+        
         val etIntentAction = view.findViewById<AutoCompleteTextView>(R.id.etIntentAction)
+        val etIntentPackage = view.findViewById<TextInputEditText>(R.id.etIntentPackage)
+        val etIntentClass = view.findViewById<TextInputEditText>(R.id.etIntentClass)
+        val btnEsplora = view.findViewById<Button>(R.id.btnEsploraIntent)
 
         val tipi = arrayOf("Webhook", "Home Assistant", "MQTT", "Intent (Broadcast)")
         spinTipo.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, tipi))
 
-        val intentComuni = arrayOf("net.dinglisch.android.tasker.ACTION_TASK", "com.arlosoft.macrodroid.MACRO_ACTION", "com.llamalab.automate.intent.ACTION_START_FIBER")
+        val intentComuni = arrayOf("net.dinglisch.android.tasker.ACTION_TASK", "com.arlosoft.macrodroid.MACRO_ACTION", "com.llamalab.automate.intent.ACTION_START_FIBER", "android.intent.action.VIEW", "android.intent.action.SEND")
         etIntentAction.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, intentComuni))
+
+        btnEsplora.setOnClickListener {
+            mostraEsploraIntent { action, pkg, cls ->
+                if (action.isNotEmpty()) etIntentAction.setText(action, false)
+                etIntentPackage.setText(pkg)
+                etIntentClass.setText(cls)
+            }
+        }
 
         var haCaricato = false
 
@@ -246,6 +299,8 @@ class MainActivity : AppCompatActivity() {
             view.findViewById<TextInputEditText>(R.id.etMqttTopic).setText(azioneEsistente.optString("mqtt_topic", ""))
             view.findViewById<TextInputEditText>(R.id.etMqttPayload).setText(azioneEsistente.optString("mqtt_payload", ""))
             etIntentAction.setText(azioneEsistente.optString("intent_action", ""))
+            etIntentPackage.setText(azioneEsistente.optString("intent_package", ""))
+            etIntentClass.setText(azioneEsistente.optString("intent_class", ""))
             
             val pos = tipi.indexOf(tipoSalvato).takeIf { it >= 0 } ?: 0
             layoutWebhook.visibility = if (pos == 0) View.VISIBLE else View.GONE
@@ -271,6 +326,8 @@ class MainActivity : AppCompatActivity() {
                     put("mqtt_topic", view.findViewById<TextInputEditText>(R.id.etMqttTopic).text.toString().trim())
                     put("mqtt_payload", view.findViewById<TextInputEditText>(R.id.etMqttPayload).text.toString().trim())
                     put("intent_action", etIntentAction.text.toString().trim())
+                    put("intent_package", etIntentPackage.text.toString().trim())
+                    put("intent_class", etIntentClass.text.toString().trim())
                 }
                 if (posizione != null) { listaAzioni[posizione] = obj; adapter.notifyItemChanged(posizione) } 
                 else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }

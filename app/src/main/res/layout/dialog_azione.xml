@@ -37,9 +37,19 @@
         </LinearLayout>
 
         <LinearLayout android:id="@+id/layoutIntent" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
-            <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="Azione Broadcast">
+            <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="Azione Intent (Implicito)">
                 <AutoCompleteTextView android:id="@+id/etIntentAction" android:layout_width="match_parent" android:layout_height="wrap_content" />
             </com.google.android.material.textfield.TextInputLayout>
+            
+            <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:hint="Package (Esplicito)">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/etIntentPackage" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:hint="Classe (Esplicito)">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/etIntentClass" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <Button android:id="@+id/btnEsploraIntent" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Esplora App/Intent del sistema" android:layout_gravity="end" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

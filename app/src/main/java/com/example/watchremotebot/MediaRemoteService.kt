@@ -236,11 +236,19 @@ class MediaRemoteService : Service() {
                     }
                     "Intent (Broadcast)" -> {
                         val actionStr = actionObj.optString("intent_action")
-                        if (actionStr.isNotEmpty()) {
-                            val intent = Intent(actionStr)
-                            sendBroadcast(intent)
-                            statusStr = "Broadcast inviato"
+                        val pkgStr = actionObj.optString("intent_package")
+                        val clsStr = actionObj.optString("intent_class")
+                        
+                        val intent = if (actionStr.isNotEmpty()) Intent(actionStr) else Intent()
+                        
+                        if (pkgStr.isNotEmpty() && clsStr.isNotEmpty()) {
+                            intent.setClassName(pkgStr, clsStr)
+                        } else if (pkgStr.isNotEmpty()) {
+                            intent.setPackage(pkgStr)
                         }
+                        
+                        sendBroadcast(intent)
+                        statusStr = "Broadcast inviato"
                     }
                 }
                 mainHandler.post { mostraFeedbackTemporaneo(statusStr) }
