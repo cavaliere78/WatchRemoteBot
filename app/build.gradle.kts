@@ -27,3 +27,4 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.media:media:1.7.0")
 }
+dependencies { implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5") }
