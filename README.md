@@ -50,29 +50,46 @@ Comunica con altre app installate sul tuo smartphone.
 
 ---
 
-## ⚙️ Impostazioni Generali
+## ⚙️ Configurazione Globale
 
-Nel menu laterale puoi configurare:
-- **Vibrazione:** Abilita/Disabilita la vibrazione tattile.
-- **Durata Vibrazione:** Intensità della vibrazione in millisecondi.
-- **Durata Feedback:** Per quanto tempo il messaggio "ESEGUITA" deve rimanere visibile sull'orologio prima di tornare al nome dell'azione (in secondi).
+Prima di aggiungere le singole azioni, configura i parametri di connessione nel menu laterale (hamburger menu):
+
+### Home Assistant
+Per far comunicare l'app con la tua istanza di HA:
+1. **URL Base:** Inserisci l'indirizzo della tua istanza (es. `http://192.168.1.100:8123` o il tuo indirizzo Nabu Casa).
+2. **Token a lunga vita:** Genera un token nel tuo profilo di Home Assistant (in fondo alla pagina del profilo utente) e incollalo nell'app.
+
+### MQTT
+Se utilizzi un broker MQTT per la tua domotica:
+1. **Broker URL:** Inserisci l'indirizzo del broker (es. `tcp://192.168.1.50:1883`). Al momento l'app supporta connessioni anonime o con credenziali integrate nell'URL (se supportate dalla libreria).
+
+### Impostazioni Generali
+Configura il feedback dell'app:
+- **Vibrazione:** Abilita/Disabilita la vibrazione del telefono.
+- **Durata Vibrazione:** Durata dell'impulso (in ms).
+- **Durata Feedback Traccia:** Per quanto tempo il messaggio di conferma (es. "ESEGUITA") deve sostituire il nome dell'azione sullo smartwatch (in secondi).
 
 ---
 
 ## 💾 Backup e Ripristino
 
 Non perdere mai la tua configurazione. Usa la funzione **Backup / Ripristino** nel menu laterale per:
-- **Esportare:** Salva un file `watch_remote_config.json` nella memoria del telefono o sul cloud.
-- **Importare:** Ripristina istantaneamente tutte le azioni e le chiavi API su un nuovo dispositivo.
+- **Esportare:** Salva un file `watch_remote_config.json` contenente tutte le azioni e le credenziali.
+- **Importare:** Carica un file JSON per ripristinare istantaneamente l'intera configurazione su un nuovo dispositivo.
 
 ---
 
 ## 📦 Installazione
 
-1. Clona la repository.
-2. Apri il progetto con **Android Studio**.
-3. Compila e installa l'APK sul tuo smartphone.
-4. Assicurati di dare all'app i permessi per le notifiche e di disabilitare l'ottimizzazione batteria per un funzionamento costante in background.
+Hai due modi per installare WatchRemoteBot:
+
+1. **Download APK (Consigliato):** Scarica l'ultimo file APK direttamente dalla sezione [Releases](https://github.com/tuo-username/WatchRemoteBot/releases) di questa repository e installalo sul tuo smartphone.
+2. **Compilazione da Sorgente:**
+    - Clona la repository.
+    - Apri il progetto con **Android Studio**.
+    - Compila e installa sul tuo smartphone.
+
+> **Nota:** Assicurati di concedere all'app il permesso di mostrare notifiche e di disabilitare l'ottimizzazione della batteria per il processo in background, altrimenti il servizio potrebbe essere terminato dal sistema operativo.
 
 ---
 
