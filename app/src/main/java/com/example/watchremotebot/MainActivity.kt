@@ -35,6 +35,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnToggleService: MaterialButton
     private lateinit var drawerLayout: DrawerLayout
 
+    private val createDocLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        uri?.let { exportConfig(it) }
+    }
+
+    private val openDocLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { importConfig(it) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -49,6 +57,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_generali -> mostraDialogGenerali()
                 R.id.nav_ha -> mostraDialogHA()
                 R.id.nav_mqtt -> mostraDialogMQTT()
+                R.id.nav_backup -> mostraDialogBackup()
             }
             true
         }
@@ -96,18 +105,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostraDialogGenerali() {
         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
-        val input = EditText(this).apply { setText(prefs.getString("FEEDBACK_DURATION", "1500")); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_generali, null)
         
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(60, 20, 60, 0)
-            addView(input)
-        }
+        val swVibrazione = view.findViewById<com.google.android.material.switchmaterial.SwitchMaterial>(R.id.switchVibrazione)
+        val etVibra = view.findViewById<TextInputEditText>(R.id.etDurataVibrazione)
+        val etFeed = view.findViewById<TextInputEditText>(R.id.etDurataFeedback)
+
+        swVibrazione.isChecked = prefs.getBoolean("VIBRAZIONE_ATTIVA", true)
+        etVibra.setText(prefs.getString("DURATA_VIBRAZIONE", "100"))
+        etFeed.setText(prefs.getString("DURATA_FEEDBACK", "3"))
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Generali: Durata Feedback (ms)")
-            .setView(container)
-            .setPositiveButton("Salva") { _, _ -> prefs.edit().putString("FEEDBACK_DURATION", input.text.toString()).apply() }
+            .setTitle("Impostazioni Generali")
+            .setView(view)
+            .setPositiveButton("Salva") { _, _ ->
+                prefs.edit()
+                    .putBoolean("VIBRAZIONE_ATTIVA", swVibrazione.isChecked)
+                    .putString("DURATA_VIBRAZIONE", etVibra.text.toString().trim())
+                    .putString("DURATA_FEEDBACK", etFeed.text.toString().trim())
+                    .apply()
+            }
             .setNegativeButton("Annulla", null)
             .show()
     }
@@ -272,6 +289,65 @@ class MainActivity : AppCompatActivity() {
         val arr = JSONArray()
         listaAzioni.forEach { arr.put(it) }
         getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE).edit().putString("LISTA_AZIONI", arr.toString()).apply()
+
+        // Notifica il servizio se è attivo per ricaricare le azioni
+        if (MediaRemoteService.isRunning) {
+            val intent = Intent(this, MediaRemoteService::class.java)
+            startForegroundService(intent)
+        }
+    }
+
+    private fun mostraDialogBackup() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Backup / Ripristino")
+            .setMessage("Esporta la configurazione in un file JSON o importane una esistente.")
+            .setPositiveButton("Esporta") { _, _ -> createDocLauncher.launch("watch_remote_config.json") }
+            .setNeutralButton("Importa") { _, _ -> openDocLauncher.launch(arrayOf("application/json")) }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
+    private fun exportConfig(uri: android.net.Uri) {
+        try {
+            val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+            val json = JSONObject()
+            prefs.all.forEach { (key, value) -> json.put(key, value) }
+            
+            contentResolver.openOutputStream(uri)?.use { os ->
+                os.write(json.toString(2).toByteArray())
+            }
+            Toast.makeText(this, "Configurazione esportata!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Errore durante l'esportazione", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun importConfig(uri: android.net.Uri) {
+        try {
+            val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            val json = JSONObject(content ?: "{}")
+            val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE).edit()
+            
+            json.keys().forEach { key ->
+                when (val value = json.get(key)) {
+                    is String -> prefs.putString(key, value)
+                    is Boolean -> prefs.putBoolean(key, value)
+                    is Int -> prefs.putInt(key, value)
+                    is Long -> prefs.putLong(key, value)
+                }
+            }
+            prefs.apply()
+            caricaAzioniSalvate()
+            
+            // Notifica il servizio per aggiornare le azioni in memoria
+            if (MediaRemoteService.isRunning) {
+                startForegroundService(Intent(this, MediaRemoteService::class.java))
+            }
+            
+            Toast.makeText(this, "Configurazione importata!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Errore durante l'importazione: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     inner class AzioneAdapter : RecyclerView.Adapter<AzioneAdapter.ViewHolder>() {

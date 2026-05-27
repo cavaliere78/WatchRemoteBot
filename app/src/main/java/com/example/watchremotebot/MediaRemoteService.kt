@@ -135,7 +135,7 @@ class MediaRemoteService : Service() {
      * Altera temporaneamente il nome della traccia mostrando l'azione eseguita.
      * Ripristina lo stato originale basandosi sulla durata impostata in "Generali".
      */
-    private fun mostraFeedbackTemporaneo(tipoPressione: String) {
+    private fun mostraFeedbackTemporaneo(testoSecondario: String) {
         if (listaAzioni.length() == 0) return
         
         val azione = listaAzioni.getJSONObject(indiceCorrente)
@@ -146,14 +146,14 @@ class MediaRemoteService : Service() {
 
         val meta = android.media.MediaMetadata.Builder()
             .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, testoFeedback)
-            .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Ricevuto: $tipoPressione")
+            .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, testoSecondario)
             .build()
         mediaSession.setMetadata(meta)
 
         // Recuperiamo il tempo di feedback dalle impostazioni (RemotePrefs)
         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
-        val durataStr = prefs.getString("FEEDBACK_DURATION", "1500") ?: "1500"
-        val durataMs = durataStr.toLongOrNull() ?: 1500L
+        val durataStr = prefs.getString("DURATA_FEEDBACK", "3") ?: "3"
+        val durataMs = (durataStr.toLongOrNull() ?: 3L) * 1000L
 
         // Elimina eventuali code precedenti e avvia il timer di ripristino
         mainHandler.removeCallbacks(ripristinaMetadatiRunnable)
@@ -169,6 +169,7 @@ class MediaRemoteService : Service() {
 
         thread {
             try {
+                var statusStr = "Eseguito"
                 when (tipo) {
                     "Webhook" -> {
                         val urlStr = actionObj.optString("url")
@@ -206,6 +207,19 @@ class MediaRemoteService : Service() {
 
                         conn.outputStream.use { os -> os.write(body.toString().toByteArray()) }
                         conn.responseCode
+                        
+                        // Recupero stato aggiornato
+                        if (entity.isNotEmpty()) {
+                            try {
+                                Thread.sleep(500) // Piccolo delay per permettere l'aggiornamento su HA
+                                val connStatus = URL("$baseUrl/api/states/$entity").openConnection() as HttpURLConnection
+                                connStatus.setRequestProperty("Authorization", "Bearer $token")
+                                val statusObj = JSONObject(connStatus.inputStream.bufferedReader().readText())
+                                statusStr = "Stato: " + statusObj.optString("state", "Inviato")
+                            } catch (e: Exception) {
+                                statusStr = "Inviato (errore stato)"
+                            }
+                        }
                     }
                     "MQTT" -> {
                         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
@@ -217,6 +231,7 @@ class MediaRemoteService : Service() {
                             client.connect()
                             client.publish(topic, MqttMessage(payload.toByteArray()))
                             client.disconnect()
+                            statusStr = "Pubblicato"
                         }
                     }
                     "Intent (Broadcast)" -> {
@@ -224,18 +239,25 @@ class MediaRemoteService : Service() {
                         if (actionStr.isNotEmpty()) {
                             val intent = Intent(actionStr)
                             sendBroadcast(intent)
+                            statusStr = "Broadcast inviato"
                         }
                     }
                 }
+                mainHandler.post { mostraFeedbackTemporaneo(statusStr) }
             } catch (e: Exception) {
                 Log.e("Service", "Errore esecuzione comando", e)
+                mainHandler.post { mostraFeedbackTemporaneo("Errore!") }
             }
         }
     }
 
     private fun vibrate() {
         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
-        val duration = prefs.getString("FEEDBACK_DURATION", "1500")?.toLongOrNull() ?: 1500L
+        if (!prefs.getBoolean("VIBRAZIONE_ATTIVA", true)) return
+        
+        val durationStr = prefs.getString("DURATA_VIBRAZIONE", "100") ?: "100"
+        val duration = durationStr.toLongOrNull() ?: 100L
+        
         val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
