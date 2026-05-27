@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group android:checkableBehavior="single">
+        <item android:id="@+id/nav_generali" android:title="Generali" />
+        <item android:id="@+id/nav_ha" android:title="Home Assistant" />
+        <item android:id="@+id/nav_mqtt" android:title="MQTT" />
+    </group>
+</menu>

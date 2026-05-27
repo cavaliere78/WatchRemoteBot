@@ -20,25 +20,37 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.navigation.NavigationView
 import com.google.android.material.textfield.TextInputEditText
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Collections
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
     private val listaAzioni = mutableListOf<JSONObject>()
     private lateinit var adapter: AzioneAdapter
     private lateinit var btnToggleService: MaterialButton
+    private lateinit var drawerLayout: DrawerLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val drawerLayout = findViewById<DrawerLayout>(R.id.drawerLayout)
+        drawerLayout = findViewById(R.id.drawerLayout)
         findViewById<MaterialToolbar>(R.id.topAppBar).setNavigationOnClickListener { drawerLayout.openDrawer(GravityCompat.START) }
-        findViewById<TextView>(R.id.btnImpostaFeedback).setOnClickListener {
+
+        val navView = findViewById<NavigationView>(R.id.navigationView)
+        navView.setNavigationItemSelectedListener { menuItem ->
             drawerLayout.closeDrawer(GravityCompat.START)
-            mostraDialogImpostazioni()
+            when (menuItem.itemId) {
+                R.id.nav_generali -> mostraDialogGenerali()
+                R.id.nav_ha -> mostraDialogHA()
+                R.id.nav_mqtt -> mostraDialogMQTT()
+            }
+            true
         }
 
         val recyclerView = findViewById<RecyclerView>(R.id.recyclerView)
@@ -58,10 +70,7 @@ class MainActivity : AppCompatActivity() {
         }).attachToRecyclerView(recyclerView)
 
         findViewById<Button>(R.id.btnAggiungi).setOnClickListener { mostraDialogAzione(null, null) }
-        findViewById<Button>(R.id.btnSalva).setOnClickListener { 
-            salvaAzioni()
-            Toast.makeText(this, "Salvato!", Toast.LENGTH_SHORT).show()
-        }
+        findViewById<Button>(R.id.btnSalva).setOnClickListener { salvaAzioni(); Toast.makeText(this, "Salvato!", Toast.LENGTH_SHORT).show() }
 
         btnToggleService = findViewById(R.id.btnToggleService)
         aggiornaStatoPulsanteServizio()
@@ -85,30 +94,92 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun mostraDialogImpostazioni() {
+    private fun mostraDialogGenerali() {
         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
-        val view = LayoutInflater.from(this).inflate(R.layout.dialog_impostazioni, null)
+        val input = EditText(this).apply { setText(prefs.getString("FEEDBACK_DURATION", "1500")); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
         
-        val etDurata = view.findViewById<TextInputEditText>(R.id.etDurataFeedback)
-        val etHaUrl = view.findViewById<TextInputEditText>(R.id.etHaUrl)
-        val etHaToken = view.findViewById<TextInputEditText>(R.id.etHaToken)
-        val etMqttBroker = view.findViewById<TextInputEditText>(R.id.etMqttBroker)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(60, 20, 60, 0)
+            addView(input)
+        }
 
-        etDurata.setText(prefs.getString("FEEDBACK_DURATION", "1500"))
-        etHaUrl.setText(prefs.getString("HA_URL", ""))
-        etHaToken.setText(prefs.getString("HA_TOKEN", ""))
-        etMqttBroker.setText(prefs.getString("MQTT_BROKER", ""))
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Generali: Durata Feedback (ms)")
+            .setView(container)
+            .setPositiveButton("Salva") { _, _ -> prefs.edit().putString("FEEDBACK_DURATION", input.text.toString()).apply() }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
 
-        MaterialAlertDialogBuilder(this).setTitle("Impostazioni Generali").setView(view)
-            .setPositiveButton("Salva") { _, _ ->
-                prefs.edit().apply {
-                    putString("FEEDBACK_DURATION", etDurata.text.toString().trim())
-                    putString("HA_URL", etHaUrl.text.toString().trim())
-                    putString("HA_TOKEN", etHaToken.text.toString().trim())
-                    putString("MQTT_BROKER", etMqttBroker.text.toString().trim())
-                    apply()
+    private fun mostraDialogHA() {
+        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(60, 20, 60, 0) }
+        val etUrl = EditText(this).apply { hint = "URL Base (es. http://192.168.1.10:8123)"; setText(prefs.getString("HA_URL", "")) }
+        val etToken = EditText(this).apply { hint = "Token a lunga vita"; setText(prefs.getString("HA_TOKEN", "")); inputType = android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        layout.addView(etUrl); layout.addView(etToken)
+        
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Configurazione Home Assistant")
+            .setView(layout)
+            .setPositiveButton("Salva") { _, _ -> prefs.edit().putString("HA_URL", etUrl.text.toString().trim()).putString("HA_TOKEN", etToken.text.toString().trim()).apply() }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
+    private fun mostraDialogMQTT() {
+        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+        val input = EditText(this).apply { hint = "Broker URL (es. tcp://192.168.1.10:1883)"; setText(prefs.getString("MQTT_BROKER", "")) }
+        
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(60, 20, 60, 0)
+            addView(input)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Configurazione MQTT")
+            .setView(container)
+            .setPositiveButton("Salva") { _, _ -> prefs.edit().putString("MQTT_BROKER", input.text.toString().trim()).apply() }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
+    private fun popolaListeHomeAssistant(tvStatus: TextView, actvService: AutoCompleteTextView, actvEntity: AutoCompleteTextView) {
+        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+        val baseUrl = prefs.getString("HA_URL", "") ?: ""
+        val token = prefs.getString("HA_TOKEN", "") ?: ""
+        if (baseUrl.isEmpty() || token.isEmpty()) return
+
+        tvStatus.visibility = View.VISIBLE
+        thread {
+            try {
+                val connStates = URL("$baseUrl/api/states").openConnection() as HttpURLConnection
+                connStates.setRequestProperty("Authorization", "Bearer $token")
+                val statesArray = JSONArray(connStates.inputStream.bufferedReader().readText())
+                val entities = (0 until statesArray.length()).map { statesArray.getJSONObject(it).getString("entity_id") }.sorted()
+
+                val connServices = URL("$baseUrl/api/services").openConnection() as HttpURLConnection
+                connServices.setRequestProperty("Authorization", "Bearer $token")
+                val servicesArray = JSONArray(connServices.inputStream.bufferedReader().readText())
+                val services = mutableListOf<String>()
+                for (i in 0 until servicesArray.length()) {
+                    val domainObj = servicesArray.getJSONObject(i)
+                    val domain = domainObj.getString("domain")
+                    val serviceMap = domainObj.getJSONObject("services")
+                    serviceMap.keys().forEach { svc -> services.add("$domain.$svc") }
                 }
-            }.setNegativeButton("Annulla", null).show()
+                services.sort()
+
+                Handler(Looper.getMainLooper()).post {
+                    actvEntity.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, entities))
+                    actvService.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, services))
+                    tvStatus.visibility = View.GONE
+                }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { tvStatus.text = "Errore connessione a HA" }
+            }
+        }
     }
 
     private fun mostraDialogAzione(posizione: Int?, azioneEsistente: JSONObject?) {
@@ -116,56 +187,73 @@ class MainActivity : AppCompatActivity() {
         
         val etNome = view.findViewById<TextInputEditText>(R.id.etNome)
         val spinTipo = view.findViewById<AutoCompleteTextView>(R.id.spinTipo)
-        
         val layoutWebhook = view.findViewById<LinearLayout>(R.id.layoutWebhook)
         val layoutHA = view.findViewById<LinearLayout>(R.id.layoutHA)
         val layoutMQTT = view.findViewById<LinearLayout>(R.id.layoutMQTT)
         val layoutIntent = view.findViewById<LinearLayout>(R.id.layoutIntent)
 
+        val etHaService = view.findViewById<AutoCompleteTextView>(R.id.etHaService)
+        val etHaEntity = view.findViewById<AutoCompleteTextView>(R.id.etHaEntity)
+        val etHaData = view.findViewById<TextInputEditText>(R.id.etHaData)
+        val tvHaStatus = view.findViewById<TextView>(R.id.tvHaStatus)
+        val etIntentAction = view.findViewById<AutoCompleteTextView>(R.id.etIntentAction)
+
         val tipi = arrayOf("Webhook", "Home Assistant", "MQTT", "Intent (Broadcast)")
         spinTipo.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, tipi))
+
+        val intentComuni = arrayOf("net.dinglisch.android.tasker.ACTION_TASK", "com.arlosoft.macrodroid.MACRO_ACTION", "com.llamalab.automate.intent.ACTION_START_FIBER")
+        etIntentAction.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, intentComuni))
+
+        var haCaricato = false
 
         spinTipo.setOnItemClickListener { _, _, pos, _ ->
             layoutWebhook.visibility = if (pos == 0) View.VISIBLE else View.GONE
             layoutHA.visibility = if (pos == 1) View.VISIBLE else View.GONE
             layoutMQTT.visibility = if (pos == 2) View.VISIBLE else View.GONE
             layoutIntent.visibility = if (pos == 3) View.VISIBLE else View.GONE
+            
+            if (pos == 1 && !haCaricato) {
+                popolaListeHomeAssistant(tvHaStatus, etHaService, etHaEntity)
+                haCaricato = true
+            }
         }
 
-        // Pre-carica dati se modifica
         if (azioneEsistente != null) {
             etNome.setText(azioneEsistente.optString("nome", ""))
             val tipoSalvato = azioneEsistente.optString("tipo", "Webhook")
             spinTipo.setText(tipoSalvato, false)
-            
             view.findViewById<TextInputEditText>(R.id.etUrl).setText(azioneEsistente.optString("url", ""))
-            view.findViewById<TextInputEditText>(R.id.etHaService).setText(azioneEsistente.optString("ha_service", ""))
-            view.findViewById<TextInputEditText>(R.id.etHaEntity).setText(azioneEsistente.optString("ha_entity", ""))
+            etHaService.setText(azioneEsistente.optString("ha_service", ""))
+            etHaEntity.setText(azioneEsistente.optString("ha_entity", ""))
+            etHaData.setText(azioneEsistente.optString("ha_data", ""))
             view.findViewById<TextInputEditText>(R.id.etMqttTopic).setText(azioneEsistente.optString("mqtt_topic", ""))
             view.findViewById<TextInputEditText>(R.id.etMqttPayload).setText(azioneEsistente.optString("mqtt_payload", ""))
-            view.findViewById<TextInputEditText>(R.id.etIntentAction).setText(azioneEsistente.optString("intent_action", ""))
+            etIntentAction.setText(azioneEsistente.optString("intent_action", ""))
             
             val pos = tipi.indexOf(tipoSalvato).takeIf { it >= 0 } ?: 0
             layoutWebhook.visibility = if (pos == 0) View.VISIBLE else View.GONE
             layoutHA.visibility = if (pos == 1) View.VISIBLE else View.GONE
             layoutMQTT.visibility = if (pos == 2) View.VISIBLE else View.GONE
             layoutIntent.visibility = if (pos == 3) View.VISIBLE else View.GONE
+            
+            if (pos == 1) { popolaListeHomeAssistant(tvHaStatus, etHaService, etHaEntity); haCaricato = true }
         } else {
             spinTipo.setText(tipi[0], false)
             layoutWebhook.visibility = View.VISIBLE
         }
 
-        MaterialAlertDialogBuilder(this).setTitle(if (azioneEsistente == null) "Nuova Azione" else "Modifica Azione").setView(view)
+        MaterialAlertDialogBuilder(this).setTitle(if (azioneEsistente == null) "Nuova Azione" else "Modifica").setView(view)
             .setPositiveButton("Salva") { _, _ ->
                 val obj = JSONObject().apply {
                     put("nome", etNome.text.toString().trim())
                     put("tipo", spinTipo.text.toString())
                     put("url", view.findViewById<TextInputEditText>(R.id.etUrl).text.toString().trim())
-                    put("ha_service", view.findViewById<TextInputEditText>(R.id.etHaService).text.toString().trim())
-                    put("ha_entity", view.findViewById<TextInputEditText>(R.id.etHaEntity).text.toString().trim())
+                    put("ha_service", etHaService.text.toString().trim())
+                    put("ha_entity", etHaEntity.text.toString().trim())
+                    put("ha_data", etHaData.text.toString().trim())
                     put("mqtt_topic", view.findViewById<TextInputEditText>(R.id.etMqttTopic).text.toString().trim())
                     put("mqtt_payload", view.findViewById<TextInputEditText>(R.id.etMqttPayload).text.toString().trim())
-                    put("intent_action", view.findViewById<TextInputEditText>(R.id.etIntentAction).text.toString().trim())
+                    put("intent_action", etIntentAction.text.toString().trim())
                 }
                 if (posizione != null) { listaAzioni[posizione] = obj; adapter.notifyItemChanged(posizione) } 
                 else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }
@@ -174,18 +262,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun caricaAzioniSalvate() {
         listaAzioni.clear()
-        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
         try {
-            val jsonArray = JSONArray(prefs.getString("LISTA_AZIONI", "[]"))
-            for (i in 0 until jsonArray.length()) listaAzioni.add(jsonArray.getJSONObject(i))
-        } catch (e: Exception) { e.printStackTrace() }
+            val arr = JSONArray(getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE).getString("LISTA_AZIONI", "[]"))
+            for (i in 0 until arr.length()) listaAzioni.add(arr.getJSONObject(i))
+        } catch (e: Exception) {}
         adapter.notifyDataSetChanged()
     }
-
     private fun salvaAzioni() {
-        val jsonArray = JSONArray()
-        listaAzioni.forEach { jsonArray.put(it) }
-        getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE).edit().putString("LISTA_AZIONI", jsonArray.toString()).apply()
+        val arr = JSONArray()
+        listaAzioni.forEach { arr.put(it) }
+        getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE).edit().putString("LISTA_AZIONI", arr.toString()).apply()
     }
 
     inner class AzioneAdapter : RecyclerView.Adapter<AzioneAdapter.ViewHolder>() {
