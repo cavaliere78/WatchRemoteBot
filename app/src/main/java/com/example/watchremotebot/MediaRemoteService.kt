@@ -6,7 +6,9 @@ import android.content.Intent
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
@@ -23,6 +25,10 @@ class MediaRemoteService : Service() {
     private lateinit var mediaSession: MediaSession
     private var listaAzioni = JSONArray()
     private var indiceCorrente = 0
+    
+    // Handler per gestire il ripristino temporizzato del nome della traccia
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val ripristinaMetadatiRunnable = Runnable { aggiornaMetadati() }
 
     companion object {
         var isRunning = false
@@ -43,6 +49,7 @@ class MediaRemoteService : Service() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(ripristinaMetadatiRunnable)
         mediaSession.release()
         isRunning = false
         super.onDestroy()
@@ -72,11 +79,21 @@ class MediaRemoteService : Service() {
         mediaSession.setPlaybackState(state)
 
         mediaSession.setCallback(object : MediaSession.Callback() {
-            override fun onPlay() { super.onPlay(); eseguiComandoCorrente() }
-            override fun onPause() { super.onPause(); eseguiComandoCorrente() }
+            override fun onPlay() { 
+                super.onPlay()
+                mostraFeedbackTemporaneo("PLAY")
+                eseguiComandoCorrente() 
+            }
+            override fun onPause() { 
+                super.onPause()
+                mostraFeedbackTemporaneo("PAUSA")
+                eseguiComandoCorrente() 
+            }
             override fun onSkipToNext() {
                 super.onSkipToNext()
                 if (listaAzioni.length() > 0) {
+                    // Rimuove eventuali timer di feedback attivi per non sovrascrivere il cambio traccia manuale
+                    mainHandler.removeCallbacks(ripristinaMetadatiRunnable)
                     indiceCorrente = (indiceCorrente + 1) % listaAzioni.length()
                     vibrate()
                     aggiornaMetadati()
@@ -85,6 +102,7 @@ class MediaRemoteService : Service() {
             override fun onSkipToPrevious() {
                 super.onSkipToPrevious()
                 if (listaAzioni.length() > 0) {
+                    mainHandler.removeCallbacks(ripristinaMetadatiRunnable)
                     indiceCorrente = (indiceCorrente - 1 + listaAzioni.length()) % listaAzioni.length()
                     vibrate()
                     aggiornaMetadati()
@@ -113,10 +131,39 @@ class MediaRemoteService : Service() {
         mediaSession.setMetadata(meta)
     }
 
+    /**
+     * Altera temporaneamente il nome della traccia mostrando l'azione eseguita.
+     * Ripristina lo stato originale basandosi sulla durata impostata in "Generali".
+     */
+    private fun mostraFeedbackTemporaneo(tipoPressione: String) {
+        if (listaAzioni.length() == 0) return
+        
+        val azione = listaAzioni.getJSONObject(indiceCorrente)
+        val nomeAzione = azione.optString("nome", "Azione").uppercase()
+
+        // Costruiamo il testo come richiesto: ***<azione> ESEGUITA***
+        val testoFeedback = "*** $nomeAzione ESEGUITA ***"
+
+        val meta = android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, testoFeedback)
+            .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Ricevuto: $tipoPressione")
+            .build()
+        mediaSession.setMetadata(meta)
+
+        // Recuperiamo il tempo di feedback dalle impostazioni (RemotePrefs)
+        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+        val durataStr = prefs.getString("FEEDBACK_DURATION", "1500") ?: "1500"
+        val durataMs = durataStr.toLongOrNull() ?: 1500L
+
+        // Elimina eventuali code precedenti e avvia il timer di ripristino
+        mainHandler.removeCallbacks(ripristinaMetadatiRunnable)
+        mainHandler.postDelayed(ripristinaMetadatiRunnable, durataMs)
+    }
+
     private fun eseguiComandoCorrente() {
         if (listaAzioni.length() == 0) return
-        val azione = listaAzioni.getJSONObject(indiceCorrente)
-        val tipo = azione.optString("tipo", "")
+        val actionObj = listaAzioni.getJSONObject(indiceCorrente)
+        val tipo = actionObj.optString("tipo", "")
 
         vibrate()
 
@@ -124,7 +171,7 @@ class MediaRemoteService : Service() {
             try {
                 when (tipo) {
                     "Webhook" -> {
-                        val urlStr = azione.optString("url")
+                        val urlStr = actionObj.optString("url")
                         val conn = URL(urlStr).openConnection() as HttpURLConnection
                         conn.requestMethod = "POST"
                         conn.responseCode
@@ -133,9 +180,9 @@ class MediaRemoteService : Service() {
                         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
                         val baseUrl = prefs.getString("HA_URL", "") ?: ""
                         val token = prefs.getString("HA_TOKEN", "") ?: ""
-                        val service = azione.optString("ha_service").replace(".", "/")
-                        val entity = azione.optString("ha_entity")
-                        val customDataStr = azione.optString("ha_data", "")
+                        val service = actionObj.optString("ha_service").replace(".", "/")
+                        val entity = actionObj.optString("ha_entity")
+                        val customDataStr = actionObj.optString("ha_data", "")
 
                         val conn = URL("$baseUrl/api/services/$service").openConnection() as HttpURLConnection
                         conn.requestMethod = "POST"
@@ -146,7 +193,6 @@ class MediaRemoteService : Service() {
                         val body = JSONObject()
                         if (entity.isNotEmpty()) body.put("entity_id", entity)
                         
-                        // Se l'utente ha compilato il campo JSON Data, estraiamo le chiavi e le uniamo al body
                         if (customDataStr.isNotEmpty()) {
                             try {
                                 val customJson = JSONObject(customDataStr)
@@ -164,8 +210,8 @@ class MediaRemoteService : Service() {
                     "MQTT" -> {
                         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
                         val broker = prefs.getString("MQTT_BROKER", "") ?: ""
-                        val topic = azione.optString("mqtt_topic")
-                        val payload = azione.optString("mqtt_payload")
+                        val topic = actionObj.optString("mqtt_topic")
+                        val payload = actionObj.optString("mqtt_payload")
                         if (broker.isNotEmpty() && topic.isNotEmpty()) {
                             val client = MqttClient(broker, MqttClient.generateClientId(), MemoryPersistence())
                             client.connect()
@@ -174,7 +220,7 @@ class MediaRemoteService : Service() {
                         }
                     }
                     "Intent (Broadcast)" -> {
-                        val actionStr = azione.optString("intent_action")
+                        val actionStr = actionObj.optString("intent_action")
                         if (actionStr.isNotEmpty()) {
                             val intent = Intent(actionStr)
                             sendBroadcast(intent)
