@@ -301,6 +301,97 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun eseguiAzione(actionObj: JSONObject, callback: (String) -> Unit) {
+        val tipo = actionObj.optString("tipo", "")
+        thread {
+            try {
+                var statusStr = "Eseguito"
+                when (tipo) {
+                    "Webhook" -> {
+                        val urlStr = actionObj.optString("url")
+                        val conn = URL(urlStr).openConnection() as HttpURLConnection
+                        conn.requestMethod = "POST"
+                        conn.responseCode
+                    }
+                    "Home Assistant" -> {
+                        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+                        val baseUrl = prefs.getString("HA_URL", "") ?: ""
+                        val token = prefs.getString("HA_TOKEN", "") ?: ""
+                        val service = actionObj.optString("ha_service").replace(".", "/")
+                        val entity = actionObj.optString("ha_entity")
+                        val customDataStr = actionObj.optString("ha_data", "")
+
+                        val conn = URL("$baseUrl/api/services/$service").openConnection() as HttpURLConnection
+                        conn.requestMethod = "POST"
+                        conn.setRequestProperty("Authorization", "Bearer $token")
+                        conn.setRequestProperty("Content-Type", "application/json")
+                        conn.doOutput = true
+
+                        val body = JSONObject()
+                        if (entity.isNotEmpty()) body.put("entity_id", entity)
+                        if (customDataStr.isNotEmpty()) {
+                            try {
+                                val customJson = JSONObject(customDataStr)
+                                customJson.keys().forEach { key -> body.put(key, customJson.get(key)) }
+                            } catch (e: Exception) {}
+                        }
+                        conn.outputStream.use { os -> os.write(body.toString().toByteArray()) }
+                        conn.responseCode
+                        
+                        if (entity.isNotEmpty()) {
+                            try {
+                                Thread.sleep(500)
+                                val connStatus = URL("$baseUrl/api/states/$entity").openConnection() as HttpURLConnection
+                                connStatus.setRequestProperty("Authorization", "Bearer $token")
+                                val statusObj = JSONObject(connStatus.inputStream.bufferedReader().readText())
+                                statusStr = "Stato: " + statusObj.optString("state", "Inviato")
+                            } catch (e: Exception) { statusStr = "Inviato (errore stato)" }
+                        }
+                    }
+                    "MQTT" -> {
+                        val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
+                        val broker = prefs.getString("MQTT_BROKER", "") ?: ""
+                        val user = prefs.getString("MQTT_USER", "") ?: ""
+                        val pass = prefs.getString("MQTT_PASS", "") ?: ""
+                        val topic = actionObj.optString("mqtt_topic")
+                        val payload = actionObj.optString("mqtt_payload")
+                        if (broker.isNotEmpty() && topic.isNotEmpty()) {
+                            val client = MqttClient(broker, MqttClient.generateClientId(), MemoryPersistence())
+                            val options = org.eclipse.paho.client.mqttv3.MqttConnectOptions()
+                            if (user.isNotEmpty()) { options.userName = user; options.password = pass.toCharArray() }
+                            client.connect(options)
+                            client.publish(topic, MqttMessage(payload.toByteArray()))
+                            client.disconnect()
+                            statusStr = "Pubblicato"
+                        }
+                    }
+                    "Intent" -> {
+                        val actionStr = actionObj.optString("intent_action")
+                        val pkgStr = actionObj.optString("intent_package")
+                        val clsStr = actionObj.optString("intent_class")
+                        val delivery = actionObj.optString("intent_delivery", "Broadcast (Standard)")
+                        val intent = if (actionStr.isNotEmpty()) Intent(actionStr) else Intent()
+                        if (pkgStr.isNotEmpty() && clsStr.isNotEmpty()) intent.setClassName(pkgStr, clsStr)
+                        else if (pkgStr.isNotEmpty()) intent.setPackage(pkgStr)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        when {
+                            delivery.contains("Activity") -> { startActivity(intent); statusStr = "App avviata" }
+                            delivery.contains("Servizio") -> {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+                                else startService(intent)
+                                statusStr = "Servizio avviato"
+                            }
+                            else -> { sendBroadcast(intent); statusStr = "Broadcast inviato" }
+                        }
+                    }
+                }
+                Handler(Looper.getMainLooper()).post { callback(statusStr) }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { callback("Errore!") }
+            }
+        }
+    }
+
     private fun mostraDialogAzione(posizione: Int?, azioneEsistente: JSONObject?) {
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_azione, null)
         
@@ -390,7 +481,7 @@ class MainActivity : AppCompatActivity() {
             layoutWebhook.visibility = View.VISIBLE
         }
 
-        MaterialAlertDialogBuilder(this).setTitle(if (azioneEsistente == null) "Nuova Azione" else "Modifica").setView(view)
+        val dialog = MaterialAlertDialogBuilder(this).setTitle(if (azioneEsistente == null) "Nuova Azione" else "Modifica").setView(view)
             .setPositiveButton("Salva") { _, _ ->
                 val obj = JSONObject().apply {
                     put("nome", etNome.text.toString().trim())
@@ -409,7 +500,24 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (posizione != null) { listaAzioni[posizione] = obj; adapter.notifyItemChanged(posizione) } 
                 else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }
-            }.setNegativeButton("Annulla", null).show()
+            }.setNegativeButton("Annulla", null)
+            
+        if (azioneEsistente != null) {
+            dialog.setNeutralButton("Elimina") { _, _ ->
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Conferma")
+                    .setMessage("Vuoi davvero eliminare questa azione?")
+                    .setPositiveButton("Sì, Elimina") { _, _ ->
+                        if (posizione != null) {
+                            listaAzioni.removeAt(posizione)
+                            adapter.notifyItemRemoved(posizione)
+                        }
+                    }
+                    .setNegativeButton("Annulla", null)
+                    .show()
+            }
+        }
+        dialog.show()
     }
 
     private fun caricaAzioniSalvate() {
@@ -488,15 +596,18 @@ class MainActivity : AppCompatActivity() {
     inner class AzioneAdapter : RecyclerView.Adapter<AzioneAdapter.ViewHolder>() {
         inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
             val tvNome: TextView = view.findViewById(R.id.tvNomeAzione)
-            val btnElimina: TextView = view.findViewById(R.id.btnElimina)
+            val btnTest: TextView = view.findViewById(R.id.btnTest)
         }
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder = ViewHolder(LayoutInflater.from(parent.context).inflate(R.layout.item_azione, parent, false))
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            holder.tvNome.text = listaAzioni[position].optString("nome", "Senza Nome")
+            val azione = listaAzioni[position]
+            holder.tvNome.text = azione.optString("nome", "Senza Nome")
             holder.itemView.setOnClickListener { mostraDialogAzione(holder.adapterPosition, listaAzioni[holder.adapterPosition]) }
-            holder.btnElimina.setOnClickListener {
-                val pos = holder.adapterPosition
-                if (pos != RecyclerView.NO_POSITION) { listaAzioni.removeAt(pos); notifyItemRemoved(pos) }
+            holder.btnTest.setOnClickListener {
+                Toast.makeText(this@MainActivity, "Test in corso...", Toast.LENGTH_SHORT).show()
+                eseguiAzione(azione) { status ->
+                    Toast.makeText(this@MainActivity, "Risultato: $status", Toast.LENGTH_SHORT).show()
+                }
             }
         }
         override fun getItemCount() = listaAzioni.size
