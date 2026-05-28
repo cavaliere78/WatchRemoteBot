@@ -199,48 +199,98 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun mostraEsploraIntent(onSelected: (String, String, String) -> Unit) {
+    private fun mostraEsploraIntent(onSelected: (String, String, String, String) -> Unit) {
         val pm = packageManager
         val items = mutableListOf<String>()
         val dataMap = mutableMapOf<String, Triple<String, String, String>>()
+        val deliveryMap = mutableMapOf<String, String>()
 
-        // 1. Azioni di sistema comuni
-        val commonActions = mapOf(
-            "Apri URL (VIEW)" to Triple(Intent.ACTION_VIEW, "", ""),
-            "Condividi (SEND)" to Triple(Intent.ACTION_SEND, "", ""),
-            "Chiama (DIAL)" to Triple(Intent.ACTION_DIAL, "", ""),
-            "Impostazioni" to Triple(android.provider.Settings.ACTION_SETTINGS, "", ""),
-            "Tasker" to Triple("net.dinglisch.android.tasker.ACTION_TASK", "", ""),
-            "MacroDroid" to Triple("com.arlosoft.macrodroid.MACRO_ACTION", "", ""),
-            "Automate" to Triple("com.llamalab.automate.intent.ACTION_START_FIBER", "", "")
-        )
-        commonActions.forEach { (label, data) ->
-            val entry = "🌐 [Azione] $label"
-            items.add(entry)
-            dataMap[entry] = data
-        }
-
-        // 2. Tutte le Activity "Launcher" (App installate)
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-        val pkgAppsList = pm.queryIntentActivities(mainIntent, 0)
-        pkgAppsList.forEach { resolveInfo ->
-            val label = resolveInfo.loadLabel(pm).toString()
-            val pkg = resolveInfo.activityInfo.packageName
-            val cls = resolveInfo.activityInfo.name
-            val entry = "📱 [App] $label"
-            items.add(entry)
-            dataMap[entry] = Triple(Intent.ACTION_MAIN, pkg, cls)
-        }
-        items.sort()
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Esplora Intent / Applicazioni")
-            .setItems(items.toTypedArray()) { _, which ->
-                val selected = items[which]
-                val triple = dataMap[selected]!!
-                onSelected(triple.first, triple.second, triple.third)
-            }
+        val progressDialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Discovery in corso...")
+            .setMessage("Scansione di tutte le app installate e dei loro componenti (Activity, Service, Receiver)...")
+            .setCancelable(false)
             .show()
+
+        thread {
+            try {
+                // 1. Azioni di sistema comuni
+                val commonActions = mapOf(
+                    "Apri URL (VIEW)" to Triple(Intent.ACTION_VIEW, "", ""),
+                    "Condividi (SEND)" to Triple(Intent.ACTION_SEND, "", ""),
+                    "Chiama (DIAL)" to Triple(Intent.ACTION_DIAL, "", ""),
+                    "Impostazioni" to Triple(android.provider.Settings.ACTION_SETTINGS, "", ""),
+                    "Tasker" to Triple("net.dinglisch.android.tasker.ACTION_TASK", "", ""),
+                    "MacroDroid" to Triple("com.arlosoft.macrodroid.MACRO_ACTION", "", ""),
+                    "Automate" to Triple("com.llamalab.automate.intent.ACTION_START_FIBER", "", "")
+                )
+                commonActions.forEach { (label, data) ->
+                    val entry = "🌐 [Azione] $label"
+                    items.add(entry)
+                    dataMap[entry] = data
+                    deliveryMap[entry] = "Broadcast (Standard)"
+                }
+
+                // 2. Discovery Profonda: Scansione di tutti i pacchetti
+                val packages = pm.getInstalledPackages(
+                    android.content.pm.PackageManager.GET_ACTIVITIES or 
+                    android.content.pm.PackageManager.GET_SERVICES or 
+                    android.content.pm.PackageManager.GET_RECEIVERS
+                )
+
+                for (pkgInfo in packages) {
+                    val appLabel = pkgInfo.applicationInfo.loadLabel(pm).toString()
+                    val pkgName = pkgInfo.packageName
+
+                    // Activities
+                    pkgInfo.activities?.forEach { activity ->
+                        if (activity.exported) {
+                            val entry = "📱 [Activity] $appLabel: ${activity.name.split(".").last()}"
+                            items.add(entry)
+                            dataMap[entry] = Triple(Intent.ACTION_MAIN, pkgName, activity.name)
+                            deliveryMap[entry] = "Avvia Activity (App)"
+                        }
+                    }
+
+                    // Services
+                    pkgInfo.services?.forEach { service ->
+                        if (service.exported) {
+                            val entry = "⚙️ [Service] $appLabel: ${service.name.split(".").last()}"
+                            items.add(entry)
+                            dataMap[entry] = Triple("", pkgName, service.name)
+                            deliveryMap[entry] = "Avvia Servizio"
+                        }
+                    }
+
+                    // Receivers
+                    pkgInfo.receivers?.forEach { receiver ->
+                        if (receiver.exported) {
+                            val entry = "📡 [Receiver] $appLabel: ${receiver.name.split(".").last()}"
+                            items.add(entry)
+                            dataMap[entry] = Triple("", pkgName, receiver.name)
+                            deliveryMap[entry] = "Broadcast (Standard)"
+                        }
+                    }
+                }
+                items.sort()
+
+                Handler(Looper.getMainLooper()).post {
+                    progressDialog.dismiss()
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle("Esplora Componenti (${items.size})")
+                        .setItems(items.toTypedArray()) { _, which ->
+                            val selected = items[which]
+                            val triple = dataMap[selected]!!
+                            onSelected(triple.first, triple.second, triple.third, deliveryMap[selected]!!)
+                        }
+                        .show()
+                }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post {
+                    progressDialog.dismiss()
+                    Toast.makeText(this, "Errore durante il discovery", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun mostraDialogAzione(posizione: Int?, azioneEsistente: JSONObject?) {
@@ -281,11 +331,11 @@ class MainActivity : AppCompatActivity() {
         etIntentAction.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, intentComuni))
 
         btnEsplora.setOnClickListener {
-            mostraEsploraIntent { action, pkg, cls ->
+            mostraEsploraIntent { action, pkg, cls, delivery ->
                 if (action.isNotEmpty()) etIntentAction.setText(action, false)
                 etIntentPackage.setText(pkg)
                 etIntentClass.setText(cls)
-                if (cls.isNotEmpty()) spinIntentDelivery.setText(deliveryTypes[1], false)
+                spinIntentDelivery.setText(delivery, false)
             }
         }
 
