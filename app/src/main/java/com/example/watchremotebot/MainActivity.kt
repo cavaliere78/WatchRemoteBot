@@ -146,18 +146,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostraDialogMQTT() {
         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
-        val input = EditText(this).apply { hint = "Broker URL (es. tcp://192.168.1.10:1883)"; setText(prefs.getString("MQTT_BROKER", "")) }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(60, 20, 60, 0) }
         
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(60, 20, 60, 0)
-            addView(input)
-        }
-
+        val etBroker = EditText(this).apply { hint = "Broker URL (es. tcp://192.168.1.10:1883)"; setText(prefs.getString("MQTT_BROKER", "")) }
+        val etUser = EditText(this).apply { hint = "Username (opzionale)"; setText(prefs.getString("MQTT_USER", "")) }
+        val etPass = EditText(this).apply { hint = "Password (opzionale)"; setText(prefs.getString("MQTT_PASS", "")); inputType = android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        
+        layout.addView(etBroker)
+        layout.addView(etUser)
+        layout.addView(etPass)
+        
         MaterialAlertDialogBuilder(this)
             .setTitle("Configurazione MQTT")
-            .setView(container)
-            .setPositiveButton("Salva") { _, _ -> prefs.edit().putString("MQTT_BROKER", input.text.toString().trim()).apply() }
+            .setView(layout)
+            .setPositiveButton("Salva") { _, _ -> 
+                prefs.edit()
+                    .putString("MQTT_BROKER", etBroker.text.toString().trim())
+                    .putString("MQTT_USER", etUser.text.toString().trim())
+                    .putString("MQTT_PASS", etPass.text.toString().trim())
+                    .apply() 
+            }
             .setNegativeButton("Annulla", null)
             .show()
     }

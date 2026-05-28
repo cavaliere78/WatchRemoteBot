@@ -224,11 +224,18 @@ class MediaRemoteService : Service() {
                     "MQTT" -> {
                         val prefs = getSharedPreferences("RemotePrefs", Context.MODE_PRIVATE)
                         val broker = prefs.getString("MQTT_BROKER", "") ?: ""
+                        val user = prefs.getString("MQTT_USER", "") ?: ""
+                        val pass = prefs.getString("MQTT_PASS", "") ?: ""
                         val topic = actionObj.optString("mqtt_topic")
                         val payload = actionObj.optString("mqtt_payload")
                         if (broker.isNotEmpty() && topic.isNotEmpty()) {
                             val client = MqttClient(broker, MqttClient.generateClientId(), MemoryPersistence())
-                            client.connect()
+                            val options = org.eclipse.paho.client.mqttv3.MqttConnectOptions()
+                            if (user.isNotEmpty()) {
+                                options.userName = user
+                                options.password = pass.toCharArray()
+                            }
+                            client.connect(options)
                             client.publish(topic, MqttMessage(payload.toByteArray()))
                             client.disconnect()
                             statusStr = "Pubblicato"

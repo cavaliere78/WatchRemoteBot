@@ -61,7 +61,8 @@ Per far comunicare l'app con la tua istanza di HA:
 
 ### MQTT
 Se utilizzi un broker MQTT per la tua domotica:
-1. **Broker URL:** Inserisci l'indirizzo del broker (es. `tcp://192.168.1.50:1883`). Al momento l'app supporta connessioni anonime o con credenziali integrate nell'URL (se supportate dalla libreria).
+1. **Broker URL:** Inserisci l'indirizzo del broker (es. `tcp://192.168.1.50:1883`).
+2. **Username/Password:** Se il tuo broker richiede autenticazione, inserisci le credenziali negli appositi campi. Se lasciati vuoti, l'app tenterà una connessione anonima.
 
 ### Impostazioni Generali
 Configura il feedback dell'app:
