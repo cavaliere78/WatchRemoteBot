@@ -234,21 +234,37 @@ class MediaRemoteService : Service() {
                             statusStr = "Pubblicato"
                         }
                     }
-                    "Intent (Broadcast)" -> {
+                    "Intent" -> {
                         val actionStr = actionObj.optString("intent_action")
                         val pkgStr = actionObj.optString("intent_package")
                         val clsStr = actionObj.optString("intent_class")
+                        val delivery = actionObj.optString("intent_delivery", "Broadcast (Standard)")
                         
                         val intent = if (actionStr.isNotEmpty()) Intent(actionStr) else Intent()
-                        
                         if (pkgStr.isNotEmpty() && clsStr.isNotEmpty()) {
                             intent.setClassName(pkgStr, clsStr)
                         } else if (pkgStr.isNotEmpty()) {
                             intent.setPackage(pkgStr)
                         }
                         
-                        sendBroadcast(intent)
-                        statusStr = "Broadcast inviato"
+                        // Aggiungiamo FLAG_ACTIVITY_NEW_TASK per le activity avviate da un service
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+                        when {
+                            delivery.contains("Activity") -> {
+                                startActivity(intent)
+                                statusStr = "App avviata"
+                            }
+                            delivery.contains("Servizio") -> {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+                                else startService(intent)
+                                statusStr = "Servizio avviato"
+                            }
+                            else -> {
+                                sendBroadcast(intent)
+                                statusStr = "Broadcast inviato"
+                            }
+                        }
                     }
                 }
                 mainHandler.post { mostraFeedbackTemporaneo(statusStr) }

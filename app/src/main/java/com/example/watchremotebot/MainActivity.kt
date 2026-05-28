@@ -204,27 +204,30 @@ class MainActivity : AppCompatActivity() {
         val items = mutableListOf<String>()
         val dataMap = mutableMapOf<String, Triple<String, String, String>>()
 
-        // Aggiungiamo alcuni intent impliciti comuni
-        val implicitCommon = mapOf(
-            "Apri Browser (VIEW)" to Triple("android.intent.action.VIEW", "", ""),
-            "Condividi (SEND)" to Triple("android.intent.action.SEND", "", ""),
-            "Tasker Action" to Triple("net.dinglisch.android.tasker.ACTION_TASK", "", "")
+        // 1. Azioni di sistema comuni
+        val commonActions = mapOf(
+            "Apri URL (VIEW)" to Triple(Intent.ACTION_VIEW, "", ""),
+            "Condividi (SEND)" to Triple(Intent.ACTION_SEND, "", ""),
+            "Chiama (DIAL)" to Triple(Intent.ACTION_DIAL, "", ""),
+            "Impostazioni" to Triple(android.provider.Settings.ACTION_SETTINGS, "", ""),
+            "Tasker" to Triple("net.dinglisch.android.tasker.ACTION_TASK", "", ""),
+            "MacroDroid" to Triple("com.arlosoft.macrodroid.MACRO_ACTION", "", ""),
+            "Automate" to Triple("com.llamalab.automate.intent.ACTION_START_FIBER", "", "")
         )
-        
-        implicitCommon.forEach { (label, data) ->
-            items.add("🌐 [Implicito] $label")
-            dataMap["🌐 [Implicito] $label"] = data
+        commonActions.forEach { (label, data) ->
+            val entry = "🌐 [Azione] $label"
+            items.add(entry)
+            dataMap[entry] = data
         }
 
-        // Recuperiamo tutte le app installate che possono essere lanciate (hanno una MAIN activity)
+        // 2. Tutte le Activity "Launcher" (App installate)
         val mainIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val pkgAppsList = pm.queryIntentActivities(mainIntent, 0)
-
         pkgAppsList.forEach { resolveInfo ->
             val label = resolveInfo.loadLabel(pm).toString()
             val pkg = resolveInfo.activityInfo.packageName
             val cls = resolveInfo.activityInfo.name
-            val entry = "📱 [Esplicito] $label ($pkg)"
+            val entry = "📱 [App] $label"
             items.add(entry)
             dataMap[entry] = Triple(Intent.ACTION_MAIN, pkg, cls)
         }
@@ -255,15 +258,26 @@ class MainActivity : AppCompatActivity() {
         val etHaData = view.findViewById<TextInputEditText>(R.id.etHaData)
         val tvHaStatus = view.findViewById<TextView>(R.id.tvHaStatus)
         
+        val spinIntentDelivery = view.findViewById<AutoCompleteTextView>(R.id.spinIntentDelivery)
         val etIntentAction = view.findViewById<AutoCompleteTextView>(R.id.etIntentAction)
         val etIntentPackage = view.findViewById<TextInputEditText>(R.id.etIntentPackage)
         val etIntentClass = view.findViewById<TextInputEditText>(R.id.etIntentClass)
         val btnEsplora = view.findViewById<Button>(R.id.btnEsploraIntent)
 
-        val tipi = arrayOf("Webhook", "Home Assistant", "MQTT", "Intent (Broadcast)")
+        val tipi = arrayOf("Webhook", "Home Assistant", "MQTT", "Intent")
         spinTipo.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, tipi))
 
-        val intentComuni = arrayOf("net.dinglisch.android.tasker.ACTION_TASK", "com.arlosoft.macrodroid.MACRO_ACTION", "com.llamalab.automate.intent.ACTION_START_FIBER", "android.intent.action.VIEW", "android.intent.action.SEND")
+        val deliveryTypes = arrayOf("Broadcast (Standard)", "Avvia Activity (App)", "Avvia Servizio")
+        spinIntentDelivery.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, deliveryTypes))
+
+        val intentComuni = arrayOf(
+            "net.dinglisch.android.tasker.ACTION_TASK", 
+            "com.arlosoft.macrodroid.MACRO_ACTION", 
+            "com.llamalab.automate.intent.ACTION_START_FIBER",
+            "android.intent.action.VIEW", 
+            "android.intent.action.SEND",
+            "android.intent.action.MAIN"
+        )
         etIntentAction.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, intentComuni))
 
         btnEsplora.setOnClickListener {
@@ -271,6 +285,7 @@ class MainActivity : AppCompatActivity() {
                 if (action.isNotEmpty()) etIntentAction.setText(action, false)
                 etIntentPackage.setText(pkg)
                 etIntentClass.setText(cls)
+                if (cls.isNotEmpty()) spinIntentDelivery.setText(deliveryTypes[1], false)
             }
         }
 
@@ -298,6 +313,8 @@ class MainActivity : AppCompatActivity() {
             etHaData.setText(azioneEsistente.optString("ha_data", ""))
             view.findViewById<TextInputEditText>(R.id.etMqttTopic).setText(azioneEsistente.optString("mqtt_topic", ""))
             view.findViewById<TextInputEditText>(R.id.etMqttPayload).setText(azioneEsistente.optString("mqtt_payload", ""))
+            
+            spinIntentDelivery.setText(azioneEsistente.optString("intent_delivery", deliveryTypes[0]), false)
             etIntentAction.setText(azioneEsistente.optString("intent_action", ""))
             etIntentPackage.setText(azioneEsistente.optString("intent_package", ""))
             etIntentClass.setText(azioneEsistente.optString("intent_class", ""))
@@ -311,6 +328,7 @@ class MainActivity : AppCompatActivity() {
             if (pos == 1) { popolaListeHomeAssistant(tvHaStatus, etHaService, etHaEntity); haCaricato = true }
         } else {
             spinTipo.setText(tipi[0], false)
+            spinIntentDelivery.setText(deliveryTypes[0], false)
             layoutWebhook.visibility = View.VISIBLE
         }
 
@@ -325,9 +343,16 @@ class MainActivity : AppCompatActivity() {
                     put("ha_data", etHaData.text.toString().trim())
                     put("mqtt_topic", view.findViewById<TextInputEditText>(R.id.etMqttTopic).text.toString().trim())
                     put("mqtt_payload", view.findViewById<TextInputEditText>(R.id.etMqttPayload).text.toString().trim())
+                    
+                    put("intent_delivery", spinIntentDelivery.text.toString())
                     put("intent_action", etIntentAction.text.toString().trim())
                     put("intent_package", etIntentPackage.text.toString().trim())
                     put("intent_class", etIntentClass.text.toString().trim())
+                }
+                if (posizione != null) { listaAzioni[posizione] = obj; adapter.notifyItemChanged(posizione) } 
+                else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }
+            }.setNegativeButton("Annulla", null).show()
+    }
                 }
                 if (posizione != null) { listaAzioni[posizione] = obj; adapter.notifyItemChanged(posizione) } 
                 else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }
