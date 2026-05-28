@@ -353,11 +353,6 @@ class MainActivity : AppCompatActivity() {
                 else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }
             }.setNegativeButton("Annulla", null).show()
     }
-                }
-                if (posizione != null) { listaAzioni[posizione] = obj; adapter.notifyItemChanged(posizione) } 
-                else { listaAzioni.add(obj); adapter.notifyItemInserted(listaAzioni.size - 1) }
-            }.setNegativeButton("Annulla", null).show()
-    }
 
     private fun caricaAzioniSalvate() {
         listaAzioni.clear()
